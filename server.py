@@ -1,5 +1,6 @@
 """MiQuemi: interfaz estática y una descarga a la vez, sin framework."""
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -28,6 +29,7 @@ MAX_BYTES = 100 * 1024 * 1024
 MAX_DURATION = 20 * 60
 MAX_JOBS = 3
 JOB_TIMEOUT = 10 * 60
+PREVIEW_TIMEOUT = 60
 JOBS = {}
 LOCK = threading.RLock()
 BUSY = threading.Lock()
@@ -50,23 +52,86 @@ def validate_url(value):
     return value
 
 
-def command(url, kind, folder, quality='best'):
-    args = local_tools.ytdlp_command() + ['--ignore-config', '--no-playlist',
+def ytdlp_base():
+    return local_tools.ytdlp_command() + ['--ignore-config', '--no-playlist',
             '--playlist-items', '1', '--use-extractors', 'default,-generic',
-            '--no-simulate', '--no-warnings', '--no-colors', '--newline', '--progress',
-            '--progress-template', 'download:PROGRESS:%(progress._percent_str)s',
-            '--print', 'before_dl:TITLE:%(title)j', '--socket-timeout', '20',
-            '--retries', '2', '--fragment-retries', '2', '--concurrent-fragments', '1',
-            '--max-filesize', str(MAX_BYTES), '--match-filters', f'!is_live & duration <=? {MAX_DURATION}',
-            '--js-runtimes', 'node', '-o', str(folder / 'archivo.%(ext)s')]
+            '--no-warnings', '--no-colors', '--socket-timeout', '20',
+            '--retries', '2', '--fragment-retries', '2', '--js-runtimes', 'node']
+
+
+def format_options(kind, quality='best'):
     if kind == 'audio':
-        args += ['-f', 'ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '0' if quality == 'best' else quality + 'K']
-    else:
-        args += ['-f', 'bv*+ba/b',
-                 '--merge-output-format', 'mp4', '--remux-video', 'mp4']
-        if quality != 'best':
-            args += ['--format-sort-force', '-S', 'res:' + quality + ',fps']
-    return args + ['--', url]
+        return ['-f', 'ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '0' if quality == 'best' else quality + 'K']
+    args = ['-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '--remux-video', 'mp4']
+    if quality != 'best':
+        args += ['--format-sort-force', '-S', 'res:' + quality + ',fps']
+    return args
+
+
+def command(url, kind, folder, quality='best'):
+    args = ytdlp_base() + ['--no-simulate', '--newline', '--progress',
+            '--progress-template', 'download:PROGRESS:%(progress._percent_str)s',
+            '--print', 'before_dl:TITLE:%(title)j', '--concurrent-fragments', '1',
+            '--max-filesize', str(MAX_BYTES), '--match-filters', f'!is_live & duration <=? {MAX_DURATION}',
+            '-o', str(folder / 'archivo.%(ext)s')]
+    return args + format_options(kind, quality) + ['--', url]
+
+
+def positive_number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0 else None
+
+
+def format_size(info, duration):
+    size = positive_number(info.get('filesize'))
+    if size:
+        return int(size), False
+    size = positive_number(info.get('filesize_approx'))
+    if size:
+        return int(size), True
+    rate = positive_number(info.get('tbr')) or ((positive_number(info.get('vbr')) or 0) + (positive_number(info.get('abr')) or 0))
+    return (round(rate * 1000 * duration / 8), True) if rate and duration else (None, True)
+
+
+def preview_data(info, kind, quality='best'):
+    while info.get('_type') in ('playlist', 'multi_video'):
+        entries = info.get('entries')
+        if not isinstance(entries, list) or not entries or not isinstance(entries[0], dict):
+            raise ValueError('No pudimos consultar el primer video de esa publicación. Prueba con su enlace directo.')
+        info = entries[0]  # --playlist-items 1 también prepara solo el primer video.
+    duration = positive_number(info.get('duration'))
+    parts = info.get('requested_formats') or [info]
+    sizes = [format_size(part, duration) for part in parts]
+    has_video = any(part.get('vcodec') != 'none' for part in parts)
+    video_bytes = sum(size for size, _ in sizes) if has_video and all(size is not None for size, _ in sizes) else None
+    dimensions = [positive_number(info.get(key)) for key in ('width', 'height')]
+    resolution = int(min(dimensions)) if all(dimensions) else None
+    audio_quality = quality if kind == 'audio' else 'best'
+    rate = 320 if audio_quality == 'best' else int(audio_quality)
+    return {'title': str(info.get('title') or '')[:200], 'duration': duration,
+            'video': {'bytes': video_bytes, 'estimated': len(parts) > 1 or info.get('ext') != 'mp4' or any(estimated for _, estimated in sizes),
+                      'resolution': resolution},
+            # ponytail: VBR no tiene peso fijo; 320 kbps es una referencia superior, no el tamaño final.
+            'mp3': {'bytes': round(duration * rate * 1000 / 8) if duration else None,
+                    'estimated': True, 'upperBound': audio_quality == 'best'},
+            'live': bool(info.get('is_live') or info.get('live_status') == 'is_live'),
+            'limits': {'maxMinutes': MAX_DURATION // 60, 'maxMB': MAX_BYTES // (1024 * 1024)}}
+
+
+def preview(url, kind, quality='best'):
+    args = ytdlp_base() + format_options('video', quality if kind == 'video' else 'best')
+    args += ['--simulate', '--skip-download', '--no-progress', '--dump-single-json', '--', url]
+    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               encoding='utf-8', errors='replace', start_new_session=(os.name == 'posix'),
+                               env=local_tools.environment())
+    try:
+        output, log = process.communicate(timeout=PREVIEW_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        terminate(process)
+        process.communicate()
+        raise ValueError('La consulta tardó demasiado. Intenta de nuevo o prueba con otro enlace.') from None
+    if process.returncode:
+        raise ValueError(error_message(log[-30000:]))
+    return preview_data(json.loads(output), kind, quality)
 
 
 def error_message(log):
@@ -306,7 +371,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlsplit(self.path).path == '/api/tools/install':
+        path = urlsplit(self.path).path
+        if path == '/api/tools/install':
             if not self.is_local():
                 return self.send_json(403, {'error': 'La instalación desde la página está disponible solamente en localhost.'})
             if not self.origin_allowed():
@@ -325,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, UnicodeError):
                 return self.send_json(400, {'error': 'Elige yt-dlp o FFmpeg.'})
             return self.send_json(202 if started else 409, {'ok': started, 'error': '' if started else 'Ya hay una instalación en curso.'})
-        if urlsplit(self.path).path != '/api/jobs':
+        if path not in ('/api/jobs', '/api/preview'):
             return self.send_json(404, {'error': 'Página no encontrada.'})
         if not self.origin_allowed():
             return
@@ -357,8 +423,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(409, {'error': 'Espera a que termine la instalación de herramientas.'})
             acquired = BUSY.acquire(blocking=False)
         if not acquired:
-            return self.send_json(429, {'error': 'Hay un archivo en preparación. Cuando termine podrás preparar otro video o audio.',
+            return self.send_json(429, {'error': 'Hay una consulta o descarga en curso. Espera a que termine para continuar.',
                                         'limits': limits_status()})
+        if path == '/api/preview':
+            try:
+                status, result = 200, preview(url, kind, quality)
+            except ValueError as error:
+                status, result = 422, {'error': str(error) if not isinstance(error, json.JSONDecodeError)
+                                      else 'No pudimos consultar los datos de ese video. Puedes intentar preparar la descarga.'}
+            except Exception:
+                status, result = 502, {'error': 'No pudimos consultar los datos de ese video. Puedes intentar preparar la descarga.'}
+            finally:
+                BUSY.release()
+            return self.send_json(status, result)
         try:
             cleanup()
             with LOCK:

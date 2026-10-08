@@ -28,12 +28,16 @@ La página permite preparar y consultar descargas directamente. Los enlaces de a
 
 ## Lo que verá tu mamá
 
-Pegar enlace → Video o Solo audio → Calidad → **Preparar descarga** → **Guardar en mi celular**.
+Pegar enlace → Video o Solo audio → Calidad → **Ver duración y peso** (opcional) → **Preparar descarga** → **Guardar en mi celular**.
 
 **Mejor calidad disponible** siempre viene seleccionada. Si cambias entre Video y Solo audio, vuelve a esa opción. Puedes elegir una calidad menor para reducir el tamaño:
 
 - **Video:** mejor calidad disponible, preferir 1080p, preferir 720p o preferir 480p. Las preferencias eligen la mejor calidad disponible sin superar esa resolución cuando existe. Si el sitio solo ofrece resoluciones superiores, se usa la menor disponible. No se reescala ni se recodifica el video.
 - **Audio:** mejor calidad disponible o MP3 a 192, 128 o 96 kbps. Las opciones de MP3 eligen la mejor fuente y la convierten con la tasa elegida.
+
+**Ver duración y peso** muestra la duración, el peso del video MP4 y el peso estimado del MP3 antes de descargar. El botón consulta los datos de `yt-dlp` en el servidor —Render cuando está publicado— sin descargar el archivo ni ocupar un lugar de descarga. Por eso puede tardar aproximadamente un minuto si Render está dormido; no se puede consultar de forma general desde GitHub Pages sin enviar el enlace al servidor.
+
+El video corresponde a la calidad elegida cuando seleccionas Video; en Solo audio muestra el video de mejor calidad. El MP3 corresponde a la tasa elegida en Solo audio. Para MP3 en mejor calidad, **Hasta ≈** usa una referencia de 320 kbps; el archivo puede pesar menos. **≈** indica una estimación y **No informado** aparece cuando el sitio no publica datos suficientes. El peso final puede variar, incluso por la conversión. Los avisos de duración, tamaño o transmisión en vivo son informativos; la descarga conserva las comprobaciones finales del servidor. Cambiar el enlace, formato o calidad elimina la consulta anterior y el botón para guardar el archivo anterior.
 
 Los límites aparecen en la página. Cuando hay tres archivos listos, el botón muestra cuánto falta para liberar un lugar. Si un archivo es demasiado grande, puedes elegir menor calidad, audio o un video más corto; el audio también debe cumplir los límites.
 

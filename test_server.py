@@ -1,4 +1,4 @@
-"""Checks sin red: límites, acceso, archivos y errores de una descarga."""
+"""Checks sin red: previsualización, límites, acceso y descargas."""
 import json
 from importlib.util import find_spec
 from pathlib import Path
@@ -235,6 +235,157 @@ class DownloadCheck(unittest.TestCase):
             status, result, _ = self.request('/api/jobs', {'url': 'https://youtu.be/example', 'format': 'audio'})
             self.assertEqual(status, 503)
             self.assertIn('botones', result['error'])
+
+    def test_preview_returns_metadata_without_a_download_or_access_code(self):
+        result = {'title': 'Receta de mamá', 'duration': 60,
+                  'video': {'bytes': 4000000, 'estimated': True, 'resolution': 480},
+                  'mp3': {'bytes': 2400000, 'estimated': True, 'upperBound': True},
+                  'live': False, 'limits': {'maxMinutes': 20, 'maxMB': 100}}
+        data = {'url': ' https://youtu.be/example ', 'format': 'video', 'quality': '480'}
+        with patch.object(server, 'HOST', '0.0.0.0'), patch.object(server, 'preview', return_value=result) as preview, \
+                patch.object(server.tempfile, 'mkdtemp', side_effect=AssertionError('Preview no crea archivos.')):
+            status, body, headers = self.request('/api/preview', data, origin='https://family.github.io')
+            self.assertEqual((status, body), (200, result))
+            self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://family.github.io')
+            preview.assert_called_once_with('https://youtu.be/example', 'video', '480')
+            self.assertEqual(server.JOBS, {})
+            self.assertFalse(server.BUSY.locked())
+            for kind, quality in (('video', 'best'), ('audio', '128')):
+                with self.subTest(kind=kind):
+                    data = {'url': 'https://youtu.be/example', 'format': kind}
+                    if quality != 'best':
+                        data['quality'] = quality
+                    self.assertEqual(self.request('/api/preview', data)[0], 200)
+                    self.assertEqual(preview.call_args.args, ('https://youtu.be/example', kind, quality))
+                    self.assertEqual(server.JOBS, {})
+
+    def test_preview_validates_link_origin_and_quality_before_lookup(self):
+        data = {'url': 'https://youtu.be/example', 'format': 'video'}
+        invalid = [[], {'url': 'file:///etc/passwd', 'format': 'video'},
+                   {**data, 'format': 'exe'}, {**data, 'quality': '128'},
+                   {**data, 'quality': ['720']}, {**data, 'quality': '--exec=bad'},
+                   {**data, 'format': 'audio', 'quality': '720'}]
+        with patch.object(server, 'preview') as preview:
+            self.assertEqual(self.request('/api/preview', data, origin='https://evil.test')[0], 403)
+            for body in invalid:
+                with self.subTest(body=body):
+                    self.assertEqual(self.request('/api/preview', body)[0], 400)
+            preview.assert_not_called()
+            self.assertEqual(server.JOBS, {})
+            self.assertFalse(server.BUSY.locked())
+
+    def test_preview_shares_busy_and_installation_guards(self):
+        data = {'url': 'https://youtu.be/example', 'format': 'video'}
+        with patch.object(server, 'preview') as preview:
+            self.assertTrue(server.BUSY.acquire(blocking=False))
+            try:
+                self.assertEqual(self.request('/api/preview', data)[0], 429)
+                self.assertEqual(self.request('/api/jobs', data)[0], 429)
+            finally:
+                server.BUSY.release()
+            self.assertTrue(server.local_tools.INSTALL_LOCK.acquire(blocking=False))
+            try:
+                self.assertEqual(self.request('/api/preview', data)[0], 409)
+            finally:
+                server.local_tools.INSTALL_LOCK.release()
+            with patch.object(server.local_tools, 'missing', return_value=['yt-dlp']):
+                self.assertEqual(self.request('/api/preview', data)[0], 503)
+            preview.assert_not_called()
+            self.assertEqual(server.JOBS, {})
+
+    def test_preview_error_releases_capacity_for_next_request(self):
+        data = {'url': 'https://youtu.be/example', 'format': 'video'}
+        with patch.object(server, 'preview', side_effect=[ValueError('La consulta tardó demasiado.'),
+                                                        RuntimeError('unexpected'), {'duration': None}]) as preview:
+            status, body, _ = self.request('/api/preview', data)
+            self.assertEqual(status, 422)
+            self.assertIn('tardó', body['error'])
+            self.assertFalse(server.BUSY.locked())
+            self.assertEqual(self.request('/api/preview', data)[0], 502)
+            self.assertFalse(server.BUSY.locked())
+            self.assertEqual(self.request('/api/preview', data)[0], 200)
+            self.assertEqual(preview.call_count, 3)
+            self.assertEqual(server.JOBS, {})
+            self.assertFalse(server.BUSY.locked())
+
+
+class PreviewDataCheck(unittest.TestCase):
+    def test_merged_video_adds_both_streams_and_marks_remux_estimated(self):
+        info = {'title': 'Video vertical', 'duration': 60,
+                'width': 854, 'height': 480,
+                'requested_formats': [
+                    {'width': 480, 'height': 854, 'filesize': 10000000, 'vcodec': 'avc1', 'acodec': 'none'},
+                    {'filesize': 1500000, 'vcodec': 'none', 'acodec': 'opus'}]}
+        result = server.preview_data(info, 'video', '480')
+        self.assertEqual(result['title'], 'Video vertical')
+        self.assertEqual(result['duration'], 60)
+        self.assertEqual(result['video']['bytes'], 11500000)
+        self.assertTrue(result['video']['estimated'])
+        self.assertEqual(result['video']['resolution'], 480)
+        self.assertFalse(result['live'])
+
+    def test_size_uses_file_size_then_approximation_then_bitrate(self):
+        for source, expected, estimated in (
+                ({'filesize': 1000000, 'filesize_approx': 2000000, 'tbr': 1000}, 1000000, False),
+                ({'filesize': 1000000, 'ext': 'webm'}, 1000000, True),
+                ({'filesize_approx': 2000000, 'tbr': 1000}, 2000000, True),
+                ({'tbr': 1000}, 7500000, True),
+                ({'vbr': 872, 'abr': 128}, 7500000, True)):
+            with self.subTest(source=source):
+                result = server.preview_data({'title': 'Video', 'duration': 60, 'ext': 'mp4', **source}, 'video')
+                self.assertEqual(result['video']['bytes'], expected)
+                self.assertEqual(result['video']['estimated'], estimated)
+
+    def test_invalid_numeric_metadata_is_unknown_and_json_safe(self):
+        for value in (float('nan'), float('inf'), -1, 0, True, '60'):
+            with self.subTest(value=value):
+                result = server.preview_data({'duration': value, 'tbr': 1000}, 'audio', '128')
+                self.assertIsNone(result['duration'])
+                self.assertIsNone(result['video']['bytes'])
+                self.assertIsNone(result['mp3']['bytes'])
+                json.dumps(result, allow_nan=False)
+                result = server.preview_data({'duration': 60, 'filesize': value, 'tbr': value}, 'video')
+                self.assertIsNone(result['video']['bytes'])
+                json.dumps(result, allow_nan=False)
+
+    def test_partial_or_missing_metadata_stays_unknown(self):
+        partial = {'duration': 60, 'requested_formats': [{'filesize': 1000000}, {}]}
+        self.assertIsNone(server.preview_data(partial, 'video')['video']['bytes'])
+        result = server.preview_data({'title': 'En vivo', 'is_live': True}, 'video')
+        self.assertIsNone(result['duration'])
+        self.assertIsNone(result['video']['bytes'])
+        self.assertIsNone(result['mp3']['bytes'])
+        self.assertTrue(result['live'])
+        self.assertEqual(result['limits'], {'maxMinutes': server.MAX_DURATION // 60,
+                                            'maxMB': server.MAX_BYTES // (1024 * 1024)})
+
+    def test_mp3_estimate_matches_selected_bitrate_and_best_upper_bound(self):
+        for kind, quality, bitrate, upper_bound in (
+                ('video', '720', 320, True), ('audio', 'best', 320, True),
+                ('audio', '192', 192, False), ('audio', '128', 128, False), ('audio', '96', 96, False)):
+            with self.subTest(kind=kind, quality=quality):
+                result = server.preview_data({'duration': 60}, kind, quality)
+                self.assertEqual(result['mp3']['bytes'], bitrate * 1000 * 60 // 8)
+                self.assertTrue(result['mp3']['estimated'])
+                self.assertEqual(result['mp3']['upperBound'], upper_bound)
+        result = server.preview_data({'duration': server.MAX_DURATION + 60}, 'audio', '128')
+        self.assertEqual(result['duration'], server.MAX_DURATION + 60)
+
+    def test_preview_uses_first_video_in_nested_wrappers(self):
+        first = {'title': 'Primer video', 'duration': 30, 'filesize': 3000000,
+                 'ext': 'mp4', 'width': 1280, 'height': 720, 'live_status': 'was_live'}
+        second = {'title': 'Segundo video', 'duration': 300, 'filesize': 30000000}
+        wrapper = {'_type': 'playlist', 'title': 'Publicación', 'entries': [
+            {'_type': 'multi_video', 'entries': [first, second]}, second]}
+        result = server.preview_data(wrapper, 'video')
+        self.assertEqual((result['title'], result['duration'], result['video']['bytes']),
+                         ('Primer video', 30, 3000000))
+        self.assertEqual(result['video']['resolution'], 720)
+        self.assertFalse(result['live'])
+        self.assertTrue(server.preview_data({**first, 'live_status': 'is_live'}, 'video')['live'])
+        for entries in (None, [], [None, second], ['invalid', second]):
+            with self.subTest(entries=entries), self.assertRaises(ValueError):
+                server.preview_data({'_type': 'playlist', 'entries': entries}, 'video')
 
 
 @unittest.skipUnless(find_spec('yt_dlp'), 'La selección de formatos requiere yt-dlp en este Python.')

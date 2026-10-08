@@ -63,6 +63,18 @@
           </select>
           <p class="field-help" id="quality-help">La mejor calidad viene seleccionada. Puedes elegir menos calidad para un archivo más pequeño. Si el sitio no ofrece esa resolución o una menor, se usa la menor disponible.</p>
         </div>
+        <button class="preview-button" id="preview" type="button" aria-describedby="preview-help">Ver duración y peso</button>
+        <p class="field-help preview-help" id="preview-help">Opcional. Consulta los datos sin descargar el archivo.</p>
+        <div class="preview-panel" id="preview-panel" aria-live="polite" aria-atomic="true" hidden>
+          <p class="preview-title" id="preview-title"></p>
+          <dl class="preview-data">
+            <div><dt>Duración</dt><dd id="preview-duration">No informado</dd></div>
+            <div><dt>Video MP4</dt><dd id="preview-video">No informado</dd></div>
+            <div><dt>Audio MP3</dt><dd id="preview-mp3">No informado</dd></div>
+          </dl>
+          <p class="field-help" id="preview-note"></p>
+          <p class="preview-warning" id="preview-warning" hidden></p>
+        </div>
         <button class="primary" id="submit" type="submit"><svg aria-hidden="true"><use href="#arrow"/></svg><span>Preparar descarga</span></button>
         <p class="quiet">Así de fácil. Tu enlace no se guarda en un historial.</p>
       </form>
