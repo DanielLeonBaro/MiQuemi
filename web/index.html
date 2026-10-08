@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f7f2">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Pega un enlace y guarda un video o su audio. Fácil, sin anuncios.">
+  <title>MiQuemi · Guarda lo que te gusta</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="arrow" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+    <symbol id="film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></symbol>
+    <symbol id="music" viewBox="0 0 24 24"><path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/></symbol>
+    <symbol id="link" viewBox="0 0 24 24"><path d="m9 15 6-6m-7 3-2 2a4 4 0 0 0 6 6l2-2m-4-12 2-2a4 4 0 0 1 6 6l-2 2"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  </svg>
+  <header class="header">
+    <a class="brand" href="./" aria-label="MiQuemi, inicio"><span class="brand-icon"><svg><use href="#arrow"/></svg></span>MiQuemi<span class="brand-dot">.</span></a>
+    <span class="header-note">Sin anuncios. Sin vueltas.</span>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="title">
+      <span class="eyebrow"><span></span> PARA GUARDAR LO QUE TE GUSTA</span>
+      <h1 id="title">Ese video.<br><span>Ahora contigo.</span></h1>
+      <p>Una receta, una canción, un recuerdo.<br>Pega su enlace y llévatelo a tu celular.</p>
+      <div class="platforms" aria-label="Sitios compatibles"><span>YouTube</span><span>Instagram</span><span>Facebook</span><span>TikTok</span><span>y más</span></div>
+    </section>
+    <details id="tools-panel" class="tools" hidden>
+      <summary>Herramientas de esta computadora <span id="tools-badge">Verificando…</span></summary>
+      <p>En modo local, esta computadora prepara tus archivos con sus propias herramientas.</p>
+      <div class="tool-row"><div><strong>yt-dlp</strong><small id="yt-state">Verificando…</small></div><button type="button" data-install="yt-dlp">Instalar yt-dlp</button></div>
+      <div class="tool-row"><div><strong>FFmpeg y ffprobe</strong><small id="ff-state">Verificando…</small></div><button type="button" data-install="ffmpeg">Instalar FFmpeg</button></div>
+      <p id="youtube-state"></p>
+      <button id="verify-tools" class="verify-tools" type="button">Verificar herramientas</button>
+      <p id="tools-status" role="status" aria-live="polite"></p>
+    </details>
+    <section class="card" aria-label="Descargar un video o audio">
+      <div class="card-heading"><h2>¿Qué quieres guardar?</h2><span class="little-arrow" aria-hidden="true">↙</span></div>
+      <form id="download-form">
+        <label class="step-label" for="url"><span>1</span> Pega el enlace</label>
+        <div class="url-field"><svg aria-hidden="true"><use href="#link"/></svg><input id="url" name="url" type="url" placeholder="https://…" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="url-help"><button id="paste" type="button">Pegar</button></div>
+        <p class="field-help" id="url-help">En la app del video, toca Compartir → Copiar enlace.</p>
+        <fieldset>
+          <legend class="step-label"><span>2</span> Elige cómo guardarlo</legend>
+          <div class="formats">
+            <label class="format"><input type="radio" name="format" value="video" checked><span class="format-body"><span class="format-icon"><svg aria-hidden="true"><use href="#film"/></svg></span><span class="format-copy"><strong>Video</strong><small>Imagen y sonido · MP4</small></span><span class="radio-mark" aria-hidden="true"></span></span></label>
+            <label class="format"><input type="radio" name="format" value="audio"><span class="format-body"><span class="format-icon"><svg aria-hidden="true"><use href="#music"/></svg></span><span class="format-copy"><strong>Solo audio</strong><small>Para escuchar · MP3</small></span><span class="radio-mark" aria-hidden="true"></span></span></label>
+          </div>
+        </fieldset>
+        <div class="quality-field">
+          <label class="step-label" for="quality"><span>3</span> Calidad</label>
+          <select id="quality" name="quality" aria-describedby="quality-help">
+            <option value="best" selected>Mejor calidad disponible</option>
+            <option value="1080">Preferir 1080p</option>
+            <option value="720">Preferir 720p</option>
+            <option value="480">Preferir 480p</option>
+          </select>
+          <p class="field-help" id="quality-help">La mejor calidad viene seleccionada. Puedes elegir menos calidad para un archivo más pequeño. Si el sitio no ofrece esa resolución o una menor, se usa la menor disponible.</p>
+        </div>
+        <button class="primary" id="submit" type="submit"><svg aria-hidden="true"><use href="#arrow"/></svg><span>Preparar descarga</span></button>
+        <p class="quiet">Así de fácil. Tu enlace no se guarda en un historial.</p>
+      </form>
+      <div id="status-panel" class="status-panel" hidden>
+        <p id="status" role="status" aria-live="polite" tabindex="-1"></p>
+        <progress id="progress" max="100" aria-label="Progreso de preparación" hidden></progress>
+        <a id="save" class="primary save" hidden><svg aria-hidden="true"><use href="#arrow"/></svg><span>Guardar en mi celular</span></a>
+        <p id="save-help" class="field-help" hidden>Toca el botón. Si se abre el archivo, usa Compartir → Guardar en Archivos o Descargar. El enlace dura 15 minutos.</p>
+      </div>
+    </section>
+    <div class="bottom-note"><svg aria-hidden="true"><use href="#check"/></svg><span>Sin instalar nada en tu celular.</span></div>
+    <aside class="limits" aria-labelledby="limits-title">
+      <h2 id="limits-title">Para descargar gratis</h2>
+      <p id="limits-summary">Hasta 20 min · 100 MB por archivo · Uno a la vez</p>
+      <p>Mejor calidad disponible de forma predeterminada. Si supera 100 MB, elige menos calidad, Solo audio o un video más corto.</p>
+      <p id="limits-availability">Puedes preparar hasta 3 archivos. Cada enlace dura 15 minutos.</p>
+      <p id="hosting-quota">El servicio incluye 5 GB de transferencia al mes, compartidos por cuenta.</p>
+      <p id="limit-wait" role="timer" aria-live="off" hidden></p>
+      <details><summary>¿Qué pasa si alcanzo un límite?</summary>
+        <p><strong>Archivo grande:</strong> elige menos calidad, Solo audio o un video más corto. La app no baja la calidad automáticamente. El audio también debe caber en 100 MB y durar hasta 20 minutos.</p>
+        <p><strong>Tres archivos listos:</strong> espera a que venza uno. Aquí verás cuánto falta y cuándo puedes preparar otro video o audio.</p>
+        <div id="hosting-help"><p><strong>Servicio gratuito:</strong> hay 5 GB de transferencia al mes, compartidos con otros servicios de la cuenta. Si se agotan, sin método de pago las descargas quedan pausadas hasta el próximo mes. <a href="https://render.com/docs/outbound-bandwidth" target="_blank" rel="noopener noreferrer">Límites del servicio</a>.</p>
+        <p>El consumo mensual real se consulta en el panel del servicio. Esta página no muestra un saldo mensual; su contador corresponde solo a los archivos temporales.</p>
+        <p>Si llevas rato sin usar la página, el servicio puede tardar aproximadamente un minuto en despertar.</p></div>
+      </details>
+    </aside>
+    <details class="help"><summary>¿Necesitas una manita?</summary><p>Usa el enlace de una publicación o video, no el de un perfil. Puedes preparar un archivo a la vez, de hasta 20 minutos y 100 MB.</p><p>Algunos videos privados, bloqueados o que piden iniciar sesión no se pueden descargar. Si un sitio rechaza el enlace, prueba con otro video.</p><p>El archivo normalmente aparece en Descargas o Archivos, no directamente en tu galería.</p></details>
+  </main>
+  <footer>Hecho para hacerlo fácil.<span>Descarga contenido que tengas permiso de guardar.</span></footer>
+</body>
+</html>

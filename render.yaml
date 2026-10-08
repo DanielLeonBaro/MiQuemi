@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: miquemi
+    runtime: docker
+    plan: free
+    autoDeployTrigger: "off"
+    healthCheckPath: /api/health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: ""
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"

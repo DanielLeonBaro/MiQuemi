@@ -1,0 +1,12 @@
+.git
+.agents
+.aws
+.codex
+.venv
+.tools
+__pycache__
+*.pyc
+.env
+output
+.playwright-cli
+miquemi.zip
